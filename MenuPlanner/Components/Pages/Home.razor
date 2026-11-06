@@ -10,7 +10,10 @@
 
 <MudPaper Class="pa-4 mb-4" Elevation="1">
     <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="4">
-        <MudDatePicker @bind-Date="_start" Label="Start date" DateFormat="ddd, MMM d" Style="max-width: 180px" />
+        @* Width goes on a wrapper: MudDatePicker copies Style onto its popup, which clipped the calendar. *@
+        <div style="max-width: 180px">
+            <MudDatePicker @bind-Date="_start" Label="Start date" DateFormat="ddd, MMM d" />
+        </div>
         <MudNumericField @bind-Value="_days" Label="Days" Min="1" Max="PlanService.MaxDays" Style="max-width: 100px" />
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Casino"
                    OnClick="GenerateAsync" Disabled="_busy">
