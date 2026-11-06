@@ -1,0 +1,102 @@
+@page "/sides"
+@attribute [Authorize]
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>Sides · Menu Planner</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4" Class="flex-grow-1">Sides</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="() => EditAsync(null)">Add side</MudButton>
+</MudStack>
+
+<MudTable Items="_sides" Hover="true" Dense="true" Loading="_sides is null" Filter="Matches">
+    <ToolBarContent>
+        <MudTextField @bind-Value="_search" Placeholder="Search" Adornment="Adornment.Start" Immediate="true"
+                      AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true" Class="mt-0" />
+    </ToolBarContent>
+    <HeaderContent>
+        <MudTh>Name</MudTh>
+        <MudTh>Goes with</MudTh>
+        <MudTh>Notes</MudTh>
+        <MudTh Style="width: 1%"></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Name">@context.Name</MudTd>
+        <MudTd DataLabel="Goes with">@string.Join(", ", context.Mains.Select(m => m.Name))</MudTd>
+        <MudTd DataLabel="Notes" Style="white-space: pre-line">@context.Notes</MudTd>
+        <MudTd Style="white-space: nowrap">
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" aria-label="Edit"
+                           OnClick="() => EditAsync(context)" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" aria-label="Delete"
+                           OnClick="() => DeleteAsync(context)" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>No sides yet.</NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<Side>? _sides;
+    private string _search = "";
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _sides = await db.Sides
+            .AsNoTracking()
+            .Include(s => s.Mains.OrderBy(m => m.Name))
+            .OrderBy(s => s.Name)
+            .ToListAsync();
+    }
+
+    private bool Matches(Side side) =>
+        string.IsNullOrWhiteSpace(_search) || side.Name.Contains(_search, StringComparison.OrdinalIgnoreCase);
+
+    private async Task EditAsync(Side? side)
+    {
+        var copy = new Side { Id = side?.Id ?? 0, Name = side?.Name ?? "", Notes = side?.Notes };
+        var dialog = await DialogService.ShowAsync<SideDialog>(null,
+            new DialogParameters<SideDialog> { { d => d.Side, copy } },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not Side edited)
+            return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (edited.Id == 0)
+        {
+            db.Sides.Add(edited);
+        }
+        else
+        {
+            var existing = await db.Sides.FindAsync(edited.Id);
+            if (existing is null)
+                return;
+            existing.Name = edited.Name;
+            existing.Notes = edited.Notes;
+        }
+
+        await db.SaveChangesAsync();
+        Snackbar.Add($"Saved {edited.Name}", Severity.Success);
+        await LoadAsync();
+    }
+
+    private async Task DeleteAsync(Side side)
+    {
+        var confirmed = await DialogService.ShowMessageBoxAsync("Delete side",
+            $"Delete \"{side.Name}\"? It will be unlinked from its mains and removed from the plan.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await db.Sides.Where(s => s.Id == side.Id).ExecuteDeleteAsync();
+        Snackbar.Add($"Deleted {side.Name}", Severity.Info);
+        await LoadAsync();
+    }
+}

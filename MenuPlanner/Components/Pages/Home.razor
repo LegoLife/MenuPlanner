@@ -1,0 +1,177 @@
+@page "/"
+@attribute [Authorize]
+@inject PlanService Plans
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject ISnackbar Snackbar
+
+<PageTitle>Menu Planner</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Dinner plan</MudText>
+
+<MudPaper Class="pa-4 mb-4" Elevation="1">
+    <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="4">
+        <MudDatePicker @bind-Date="_start" Label="Start date" DateFormat="ddd, MMM d" Style="max-width: 180px" />
+        <MudNumericField @bind-Value="_days" Label="Days" Min="1" Max="PlanService.MaxDays" Style="max-width: 100px" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Casino"
+                   OnClick="GenerateAsync" Disabled="_busy">
+            @(_plan.Count == 0 ? "Generate" : "Regenerate")
+        </MudButton>
+        @if (_plan.Any(d => d.Locked))
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Locked days are kept.</MudText>
+        }
+    </MudStack>
+</MudPaper>
+
+@if (_mainNames.Count == 0 && _loaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        You don't have any mains yet. <MudLink Href="mains">Add some</MudLink> to start planning.
+    </MudAlert>
+}
+
+@if (Repeats.Count > 0)
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-4">
+        Repeated this plan: @string.Join(", ", Repeats.Select(r => $"{r.Name} ×{r.Count}")).
+        @if (_mainNames.Count < _plan.Count)
+        {
+            <text> You have @_mainNames.Count mains for @_plan.Count days, so add more mains to avoid repeats.</text>
+        }
+    </MudAlert>
+}
+
+@if (_plan.Count == 0 && _loaded)
+{
+    <MudText Class="mud-text-secondary">No plan yet. Pick a start date and press Generate.</MudText>
+}
+
+<MudGrid>
+    @foreach (var day in _plan)
+    {
+        <MudItem xs="12" sm="6" md="4" lg="3">
+            <MudCard Outlined="true" Class="@DayClass(day)" Style="height: 100%">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.subtitle1"><b>@day.Date.ToString("dddd")</b></MudText>
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                            @day.Date.ToString("MMM d")@(day.Date == Today ? " · Today" : "")
+                        </MudText>
+                    </CardHeaderContent>
+                    <CardHeaderActions>
+                        <MudToggleIconButton Toggled="day.Locked" ToggledChanged="locked => SetLockedAsync(day, locked)"
+                                             Icon="@Icons.Material.Filled.LockOpen" ToggledIcon="@Icons.Material.Filled.Lock"
+                                             ToggledColor="Color.Primary" Size="Size.Small"
+                                             title="@(day.Locked ? "Unlock (Regenerate will change it)" : "Lock (Regenerate will skip it)")" />
+                    </CardHeaderActions>
+                </MudCardHeader>
+                <MudCardContent Class="pt-0">
+                    @if (day.Main is null)
+                    {
+                        <MudText Typo="Typo.h6" Class="mud-text-secondary"><i>Nothing planned</i></MudText>
+                    }
+                    else if (day.Main.RecipeUrl is not null)
+                    {
+                        <MudLink Href="@day.Main.RecipeUrl" Target="_blank" Typo="Typo.h6">@day.Main.Name</MudLink>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.h6">@day.Main.Name</MudText>
+                    }
+
+                    <div class="mt-1" style="min-height: 32px">
+                        @foreach (var side in day.Sides)
+                        {
+                            <MudChip T="string" Size="Size.Small" Text="@side.Name" />
+                        }
+                    </div>
+
+                    <MudSelect T="int?" Value="day.MainId" ValueChanged="mainId => SetMainAsync(day, mainId)"
+                               Label="Choose main" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Class="mt-3"
+                               ToStringFunc="@(id => id is int i && _mainNames.TryGetValue(i, out var n) ? n : "")">
+                        <MudSelectItem T="int?" Value="null">(nothing)</MudSelectItem>
+                        @foreach (var (id, name) in _mainNames.OrderBy(m => m.Value))
+                        {
+                            <MudSelectItem T="int?" Value="id">@name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudCardContent>
+                <MudCardActions>
+                    <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Casino"
+                               OnClick="() => RunAsync(() => Plans.RerollDayAsync(day.Id))" Disabled="_busy">Re-roll</MudButton>
+                    <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh"
+                               OnClick="() => RunAsync(() => Plans.RerollSidesAsync(day.Id))"
+                               Disabled="@(_busy || day.Main is null)">Sides</MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+    }
+</MudGrid>
+
+@code {
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    private List<PlanDay> _plan = [];
+    private Dictionary<int, string> _mainNames = [];
+    private DateTime? _start = DateTime.Today;
+    private int _days = 7;
+    private bool _loaded;
+    private bool _busy;
+
+    private List<(string Name, int Count)> Repeats => _plan
+        .Where(d => d.Main is not null)
+        .GroupBy(d => d.Main!.Name)
+        .Where(g => g.Count() > 1)
+        .Select(g => (g.Key, g.Count()))
+        .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        if (_plan.Count > 0)
+        {
+            _start = _plan[0].Date.ToDateTime(TimeOnly.MinValue);
+            _days = _plan.Count;
+        }
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        _plan = await Plans.GetPlanAsync();
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _mainNames = await db.Mains.ToDictionaryAsync(m => m.Id, m => m.Name);
+    }
+
+    private static string DayClass(PlanDay day) => day.Date == Today ? "mud-border-primary" : "";
+
+    private Task GenerateAsync()
+    {
+        var start = DateOnly.FromDateTime(_start ?? DateTime.Today);
+        return RunAsync(() => Plans.GenerateAsync(start, _days));
+    }
+
+    private Task SetLockedAsync(PlanDay day, bool locked) => RunAsync(() => Plans.SetLockedAsync(day.Id, locked));
+
+    private Task SetMainAsync(PlanDay day, int? mainId) => RunAsync(() => Plans.SetMainAsync(day.Id, mainId));
+
+    /// <summary>Runs a plan change, then reloads the plan.</summary>
+    private async Task RunAsync(Func<Task> change)
+    {
+        _busy = true;
+        try
+        {
+            await change();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Something went wrong: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

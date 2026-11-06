@@ -1,0 +1,150 @@
+@page "/mains"
+@attribute [Authorize]
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>Mains · Menu Planner</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4" Class="flex-grow-1">Mains</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="() => EditAsync(null)">Add main</MudButton>
+</MudStack>
+
+<MudTable Items="_mains" Hover="true" Dense="true" Loading="_mains is null" Filter="Matches">
+    <ToolBarContent>
+        <MudTextField @bind-Value="_search" Placeholder="Search" Adornment="Adornment.Start" Immediate="true"
+                      AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true" Class="mt-0" />
+    </ToolBarContent>
+    <HeaderContent>
+        <MudTh>Name</MudTh>
+        <MudTh>Sides per dinner</MudTh>
+        <MudTh>Goes with</MudTh>
+        <MudTh>Notes</MudTh>
+        <MudTh Style="width: 1%"></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Name">
+            @if (context.RecipeUrl is not null)
+            {
+                <MudLink Href="@context.RecipeUrl" Target="_blank">@context.Name</MudLink>
+            }
+            else
+            {
+                @context.Name
+            }
+        </MudTd>
+        <MudTd DataLabel="Sides per dinner">@context.SideCount</MudTd>
+        <MudTd DataLabel="Goes with">
+            @foreach (var side in context.Sides)
+            {
+                <MudChip T="string" Size="Size.Small" Text="@side.Name" />
+            }
+        </MudTd>
+        <MudTd DataLabel="Notes" Style="white-space: pre-line">@context.Notes</MudTd>
+        <MudTd Style="white-space: nowrap">
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" aria-label="Edit"
+                           OnClick="() => EditAsync(context)" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" aria-label="Delete"
+                           OnClick="() => DeleteAsync(context)" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>No mains yet.</NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<Main>? _mains;
+    private string _search = "";
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _mains = await db.Mains
+            .AsNoTracking()
+            .Include(m => m.Sides.OrderBy(s => s.Name))
+            .OrderBy(m => m.Name)
+            .ToListAsync();
+    }
+
+    private bool Matches(Main main) =>
+        string.IsNullOrWhiteSpace(_search) || main.Name.Contains(_search, StringComparison.OrdinalIgnoreCase);
+
+    private async Task EditAsync(Main? main)
+    {
+        List<Side> allSides;
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            allSides = await db.Sides.AsNoTracking().OrderBy(s => s.Name).ToListAsync();
+        }
+
+        var copy = main is null
+            ? new Main()
+            : new Main
+            {
+                Id = main.Id,
+                Name = main.Name,
+                Notes = main.Notes,
+                RecipeUrl = main.RecipeUrl,
+                SideCount = main.SideCount,
+                Sides = main.Sides.ToList(),
+            };
+
+        var dialog = await DialogService.ShowAsync<MainDialog>(null,
+            new DialogParameters<MainDialog> { { d => d.Main, copy }, { d => d.AllSides, allSides } },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not Main edited)
+            return;
+
+        await SaveAsync(edited);
+        Snackbar.Add($"Saved {edited.Name}", Severity.Success);
+        await LoadAsync();
+    }
+
+    private async Task SaveAsync(Main edited)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var entity = edited.Id == 0
+            ? db.Mains.Add(new Main()).Entity
+            : await db.Mains.Include(m => m.Sides).SingleAsync(m => m.Id == edited.Id);
+
+        entity.Name = edited.Name;
+        entity.Notes = edited.Notes;
+        entity.RecipeUrl = edited.RecipeUrl;
+        entity.SideCount = edited.SideCount;
+
+        var sideIds = edited.Sides.Select(s => s.Id).ToList();
+        entity.Sides = await db.Sides.Where(s => sideIds.Contains(s.Id)).ToListAsync();
+
+        await db.SaveChangesAsync();
+    }
+
+    private async Task DeleteAsync(Main main)
+    {
+        var confirmed = await DialogService.ShowMessageBoxAsync("Delete main",
+            $"Delete \"{main.Name}\"? Any plan day using it will be left empty.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Mains.FindAsync(main.Id);
+        if (entity is not null)
+        {
+            // Empty days keep no sides from the deleted main.
+            var days = await db.PlanDays.Include(d => d.Sides).Where(d => d.MainId == main.Id).ToListAsync();
+            days.ForEach(d => d.Sides.Clear());
+
+            db.Mains.Remove(entity);
+            await db.SaveChangesAsync();
+        }
+
+        Snackbar.Add($"Deleted {main.Name}", Severity.Info);
+        await LoadAsync();
+    }
+}

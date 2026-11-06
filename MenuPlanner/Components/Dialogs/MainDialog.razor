@@ -1,0 +1,67 @@
+<MudDialog>
+    <TitleContent>@(Main.Id == 0 ? "Add main" : "Edit main")</TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <MudTextField @bind-Value="Main.Name" Label="Name" Required="true" RequiredError="Name is required"
+                          MaxLength="200" AutoFocus="true" Immediate="true" />
+            <MudTextField @bind-Value="Main.RecipeUrl" Label="Recipe link" InputType="InputType.Url"
+                          MaxLength="500" Validation="(Func<string?, string?>)ValidateUrl" />
+            <MudTextField @bind-Value="Main.Notes" Label="Notes" Lines="3" MaxLength="2000" />
+            <MudNumericField @bind-Value="Main.SideCount" Label="Sides per dinner" Min="0" Max="3"
+                             HelperText="How many sides the generator picks (0–3)" />
+            <MudSelect T="int" Label="Goes with these sides" MultiSelection="true"
+                       @bind-SelectedValues="_sideIds" ToStringFunc="SideName"
+                       HelperText="@SidesHelper" AnchorOrigin="Origin.BottomCenter">
+                @foreach (var side in AllSides)
+                {
+                    <MudSelectItem T="int" Value="side.Id">@side.Name</MudSelectItem>
+                }
+            </MudSelect>
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => Dialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = null!;
+
+    /// <summary>A detached copy to edit; its <see cref="Main.Sides"/> are the initial selection.</summary>
+    [Parameter] public Main Main { get; set; } = new();
+
+    [Parameter] public IReadOnlyList<Side> AllSides { get; set; } = [];
+
+    private MudForm _form = null!;
+    private IReadOnlyCollection<int> _sideIds = [];
+
+    private string SidesHelper => _sideIds.Count < Main.SideCount
+        ? "Fewer sides linked than per dinner, so the generator will use all of them"
+        : "";
+
+    protected override void OnInitialized() => _sideIds = Main.Sides.Select(s => s.Id).ToHashSet();
+
+    private string SideName(int id) => AllSides.FirstOrDefault(s => s.Id == id)?.Name ?? "";
+
+    private static string? ValidateUrl(string? url) =>
+        string.IsNullOrWhiteSpace(url) || Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
+            ? null
+            : "Enter a full http(s) link";
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid)
+            return;
+
+        Main.Name = Main.Name.Trim();
+        Main.Notes = string.IsNullOrWhiteSpace(Main.Notes) ? null : Main.Notes.Trim();
+        Main.RecipeUrl = string.IsNullOrWhiteSpace(Main.RecipeUrl) ? null : Main.RecipeUrl.Trim();
+        Main.SideCount = Math.Clamp(Main.SideCount, 0, 3);
+
+        var selected = _sideIds.ToHashSet();
+        Main.Sides = AllSides.Where(s => selected.Contains(s.Id)).ToList();
+        Dialog.Close(DialogResult.Ok(Main));
+    }
+}

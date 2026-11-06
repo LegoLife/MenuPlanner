@@ -1,0 +1,14 @@
+# MenuPlanner on the Raspberry Pi (prebuilt image, data on the external drive).
+# Lives at ~/menuplanner with .env (password hash) and set-password.sh.
+services:
+  menuplanner:
+    image: menuplanner:latest
+    container_name: menuplanner
+    restart: unless-stopped
+    ports:
+      - "8086:8080"
+    environment:
+      MenuPlanner__PasswordHash: ${MENUPLANNER_PASSWORD_HASH:?Run ./set-password.sh first}
+      TZ: America/New_York
+    volumes:
+      - /mnt/data/menuplanner:/data
