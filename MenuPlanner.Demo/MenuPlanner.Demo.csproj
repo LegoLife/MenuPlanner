@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <!-- Browser-only demo for GitHub Pages: the real MenuPlanner pages and PlanService, with SQLite compiled
+       to WebAssembly and the sample dishes. Needs the wasm-tools workload (dotnet workload install wasm-tools). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>MenuPlanner</RootNamespace>
+    <WasmBuildNative>true</WasmBuildNative>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.11" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.11" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" Version="10.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
+    <PackageReference Include="MudBlazor" Version="9.10.0" />
+    <!-- EF Core builds its model by reflection; keep its assemblies whole. -->
+    <TrimmerRootAssembly Include="Microsoft.EntityFrameworkCore" />
+    <TrimmerRootAssembly Include="Microsoft.EntityFrameworkCore.Relational" />
+    <TrimmerRootAssembly Include="Microsoft.EntityFrameworkCore.Sqlite" />
+  </ItemGroup>
+
+  <!-- Shared with the server app (linked, not copied). Forward slashes only: a backslash in Link becomes
+       part of the file name on Linux (CI), and the pages then lose their _Imports.razor. -->
+  <PropertyGroup>
+    <App>../MenuPlanner/</App>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(App)Data/*.cs" Link="Shared/Data/%(Filename)%(Extension)" />
+    <Compile Include="$(App)Planning/*.cs" Link="Shared/Planning/%(Filename)%(Extension)" />
+    <Content Include="$(App)Components/**/*.razor;$(App)Components/**/*.razor.css"
+             Exclude="$(App)Components/App.razor;$(App)Components/Pages/Login.razor;$(App)Components/Pages/Error.razor;$(App)Components/Layout/ReconnectModal.razor*"
+             Link="Components/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- Static web assets don't follow linked files, so copy the shared ones in (they're git-ignored here). -->
+  <Target Name="CopySharedAssets" BeforeTargets="BeforeBuild;ResolveProjectStaticWebAssets">
+    <ItemGroup>
+      <SharedAsset Include="$(App)wwwroot/*.css;$(App)wwwroot/*.svg;$(App)wwwroot/*.png" />
+    </ItemGroup>
+    <Copy SourceFiles="@(SharedAsset)" DestinationFolder="wwwroot" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

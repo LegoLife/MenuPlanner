@@ -60,3 +60,7 @@ h1:focus {
     .login-card label { color: #a89d96; }
     .login-card input { background: #1f1c1b; color: inherit; border-color: #45403c; }
 }
+
+/* Browser-only demo (MenuPlanner.Demo on GitHub Pages) */
+.mp-demo-banner { margin-top: 64px; padding: 8px 16px; text-align: center; font-size: .85rem;
+    background: #fff3cd; color: #5c4400; border-bottom: 1px solid #f0d78c; }

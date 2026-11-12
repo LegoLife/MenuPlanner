@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="MenuPlanner.Tests/MenuPlanner.Tests.csproj" />
   <Project Path="MenuPlanner/MenuPlanner.csproj" />
+  <Project Path="MenuPlanner.Demo/MenuPlanner.Demo.csproj" />
 </Solution>
